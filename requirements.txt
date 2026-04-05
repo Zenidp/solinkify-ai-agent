@@ -1,0 +1,5 @@
+streamlit
+requests
+solana
+solders
+python-dotenv
