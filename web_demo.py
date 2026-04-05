@@ -129,45 +129,89 @@ if st.button("🚀 Luncurkan Agen AI"):
                 st.json(purchased_data) 
 
             # ---------------------------------------------------------
-            # FASE 5: VISUALISASI DATA (DASHBOARD AI)
+            # FASE 5: VISUALISASI DATA (DASHBOARD AI CUACA)
             # ---------------------------------------------------------
             st.markdown("---")
-            st.markdown("### 🧠 AI Market Intelligence Report (Hasil Analisis)")
-            st.markdown("Berikut adalah hasil visualisasi dari data yang baru saja dibeli:")
+            st.markdown("### 🌤️ Oracle Weather Intelligence Report")
+            st.markdown("Berikut adalah hasil dekode data cuaca terdesentralisasi yang dibeli dari jaringan Solana:")
             
-            dataset_name = purchased_data.get("dataset_name", "Unknown Dataset")
-            accuracy = purchased_data.get("accuracy_rating", 0)
+            # 1. Header Informasi Provider
+            product_name = purchased_data.get("product", "Unknown Oracle")
+            provider = purchased_data.get("provider", "Unknown Provider")
+            desc = purchased_data.get("description", "")
             
-            col1, col2 = st.columns(2)
-            col1.metric(label="Sumber Dataset", value=dataset_name)
-            col2.metric(label="Tingkat Akurasi AI", value=f"{accuracy * 100}%")
+            st.info(f"**{product_name}** by {provider}\n\n_{desc}_")
             
-            st.markdown("#### 💡 Rekomendasi Aksi Pasar")
+            # 2. Key Metrics (Metadata Jaringan)
+            meta = purchased_data.get("meta", {})
+            st.markdown("#### 📡 Network Consensus & Reliability")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("🌍 Total Lokasi", meta.get("total_feeds", 0))
+            col2.metric("⚡ Uptime", meta.get("success_rate", "0%"))
+            col3.metric("💻 Active Nodes", meta.get("active_nodes", 0))
+            col4.metric("⏱️ Update Rate", f"{meta.get('update_interval_hours', 0)} Jam")
             
-            tokens_data = purchased_data.get("data", [])
+            st.markdown("---")
+            st.markdown("#### 📍 Live Data Feeds")
             
-            if tokens_data:
-                cols = st.columns(len(tokens_data))
-                
-                for i, item in enumerate(tokens_data):
-                    with cols[i]:
-                        st.subheader(f"🪙 {item['token']}")
+            feeds = purchased_data.get("sample_feeds", [])
+            
+            if feeds:
+                # Mengelompokkan data berdasarkan lokasi agar rapi
+                locations = {}
+                for feed in feeds:
+                    loc = feed.get("location", "Unknown")
+                    if loc not in locations:
+                        locations[loc] = []
+                    locations[loc].append(feed)
+                    
+                # Menampilkan kartu (kolom) untuk setiap lokasi
+                for loc, data_list in locations.items():
+                    with st.container():
+                        st.markdown(f"##### 🏙️ {loc}")
                         
-                        sentiment = item["sentiment"].lower()
-                        action = item["action"].upper()
+                        # Buat kolom dinamis sesuai jumlah parameter di lokasi tersebut
+                        cols = st.columns(len(data_list))
                         
-                        if sentiment == "bullish":
-                            st.success(f"📈 {sentiment.upper()} ➔ **{action}**")
-                        elif sentiment == "bearish":
-                            st.error(f"📉 {sentiment.upper()} ➔ **{action}**")
-                        else:
-                            st.warning(f"➖ {sentiment.upper()} ➔ **{action}**")
-                        
-                        st.write(f"**Target Harga:** ${item['target_price']}")
-                        st.write(f"**Keyakinan:** {int(item['confidence'] * 100)}%")
-                        st.progress(item['confidence'])
+                        for i, item in enumerate(data_list):
+                            param = item.get("parameter", "")
+                            val = item.get("value", 0)
+                            unit = item.get("unit", "")
+                            raw_val = item.get("value_raw", 0)
+                            scale = item.get("scale", 1)
+                            
+                            # Handle anomali nilai mentah yang belum dibagi scale (contoh: 298 -> 29.8 °C)
+                            if val == raw_val and scale > 1:
+                                val = val / scale
+                                
+                            # Mapping Icon sesuai parameter
+                            icon = "🌡️" if param == "Temperature" else \
+                                   "💧" if param == "Humidity" else \
+                                   "💨" if param == "Wind Speed" else \
+                                   "☁️" if param == "Cloud Cover" else "📊"
+                            
+                            with cols[i]:
+                                # Menggunakan card styling bawaan st.metric
+                                st.metric(label=f"{icon} {param}", value=f"{val} {unit}")
+                                
+                        timestamp = data_list[0].get('updated_at_iso', '').replace("T", " ").replace("Z", " UTC")
+                        st.caption(f"⏱️ _Last updated on-chain: {timestamp}_")
+                        st.write("") # Spacer
             else:
-                st.info("Tidak ada data token yang ditemukan dalam dataset ini.")
+                st.info("Tidak ada data feeds cuaca yang ditemukan dalam dataset ini.")
+                
+            # 3. Status Node Validator (Opsional untuk kesan Web3 yang lebih kuat)
+            with st.expander("Lihat Status Konsensus Node Oracle"):
+                nodes = purchased_data.get("nodes", [])
+                if nodes:
+                    node_cols = st.columns(3) # Tampilkan 3 kolom per baris
+                    for i, node in enumerate(nodes):
+                        with node_cols[i % 3]:
+                            status = "🟢 Active" if node.get("active") else "🔴 Offline"
+                            st.markdown(f"**{node.get('id')}**")
+                            st.caption(status)
+                            st.write(f"Total Submits: `{node.get('submits')}`")
+                            st.markdown("---")
             
         else:
             print_log(f"❌ Gagal mengambil data. Server merespons: {claim_response.text}")
