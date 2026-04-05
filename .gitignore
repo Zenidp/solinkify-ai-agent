@@ -1,0 +1,8 @@
+echo ".env" > .gitignore
+echo "venv/" >> .gitignore
+venv/
+__pycache__/
+node_modules/
+target/
+.env
+*.raw
