@@ -14,7 +14,7 @@ from solders.transaction import Transaction
 # 1. SETUP KEAMANAN & KONFIGURASI
 load_dotenv()
 MARKETPLACE_URL = "https://api.solinkify.com" # URL backend Solinkify
-RPC_URL = "https://devnet.helius-rpc.com/?api-key=3933305d-607a-4d03-b59d-1dd12b5383a5"
+RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
 
 # 2. SETUP TAMPILAN WEB (UI)
 st.set_page_config(page_title="AI Agent Demo", page_icon="🤖", layout="centered")
