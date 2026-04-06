@@ -102,24 +102,51 @@ if st.button("🚀 Luncurkan Agen AI"):
         time.sleep(3) 
 
         # ---------------------------------------------------------
-        # FASE 3: KLAIM DATA & KIRIM EMAIL
+        # FASE 3: KLAIM DATA (DENGAN KRIPTOGRAFI & RETRY IDEMPOTENT)
         # ---------------------------------------------------------
-        print_log("\n🔓 Menyerahkan bukti transaksi untuk mengambil barang...")
-        headers = {'x-payment-signature': str(signature)}
+        print_log("\n🔓 Membuat Tanda Tangan Kriptografi (Message Signing)...")
         
-        # NOTE: Parameter email dimasukkan ke API agar backend Rust mengirim email via Resend
+        # 1. AI meracik pesan khusus dan menandatanganinya pakai Private Key
+        message_to_sign = f"{target_item_id}:{signature}".encode("utf-8")
+        auth_signature = ai_wallet.sign_message(message_to_sign)
+        
+        # 2. Menyusun 3 Kunci Keamanan
+        headers = {
+            'x-payment-signature': str(signature),
+            'x-buyer-pubkey': str(ai_wallet.pubkey()),
+            'x-auth-signature': str(auth_signature)
+        }
+        
         claim_endpoint = f"{MARKETPLACE_URL}/api/x402/book/{target_item_id}?email={target_email}"
-        claim_response = requests.get(claim_endpoint, headers=headers, timeout=30)
         
-        if claim_response.status_code == 200:
-            claim_data = claim_response.json()
+        # 3. Sistem Retry (Mitigasi Jika Internet Mati)
+        max_retries = 3
+        claim_data = None
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                print_log(f"🔗 Mencoba mengunduh data (Percobaan {attempt}/{max_retries})...")
+                # Kita gunakan timeout yang pendek untuk mensimulasikan jaringan lambat
+                claim_response = requests.get(claim_endpoint, headers=headers, timeout=15)
+                
+                if claim_response.status_code == 200:
+                    claim_data = claim_response.json()
+                    break # Keluar dari loop jika berhasil
+                elif claim_response.status_code == 401:
+                    print_log(f"❌ [KEAMANAN] Server menolak: {claim_response.text}")
+                    st.stop()
+            except requests.exceptions.RequestException as e:
+                print_log(f"⚠️ Koneksi bermasalah: {str(e)}. Sistem Idempotent akan mencoba ulang...")
+                time.sleep(3)
+        
+        if claim_data:
             download_url = claim_data.get("file_url")
             print_log(f"📧 Backend mengkonfirmasi: Email berisi link Cloudflare R2 sedang dikirim ke {target_email}.")
             
-            # AI tetap mendownload data ke memori sementaranya untuk dianalisis
+            # AI mengekstrak datanya
             file_response = requests.get(download_url)
             purchased_data = file_response.json()
-            print_log("📥 Proses selesai! Data berhasil diakuisisi oleh AI ke dalam memori.")
+            print_log("📥 Proses selesai! Data berhasil diakuisisi dengan aman oleh AI.")
             
             # ---------------------------------------------------------
             # FASE 4: AI MENAMPILKAN DATA MENTAH (TANPA SAVE LOKAL)
