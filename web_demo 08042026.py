@@ -11,129 +11,106 @@ from solders.system_program import TransferParams, transfer
 from solders.message import Message
 from solders.transaction import Transaction
 
-# ==========================================
-# 1. SECURITY & ENVIRONMENT SETUP
-# ==========================================
-# Load environment variables from .env file
+# 1. SETUP KEAMANAN & KONFIGURASI
 load_dotenv()
-# Define the Solinkify backend API URL
-MARKETPLACE_URL = "https://api.solinkify.com" 
-# Define the Solana RPC endpoint (defaults to Devnet if not specified in .env)
+MARKETPLACE_URL = "https://api.solinkify.com" # URL backend Solinkify
 RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
 
-# ==========================================
-# 2. WEB UI SETUP (STREAMLIT)
-# ==========================================
-# Configure the main Streamlit page settings
+# 2. SETUP TAMPILAN WEB (UI)
 st.set_page_config(page_title="AI Agent Demo", page_icon="🤖", layout="centered")
 
 st.title("🤖 Solinkify: Autonomous AI Buyer")
 st.markdown("""
-This interactive demo showcases a true *Machine-to-Machine* (M2M) economy. 
-Enter a dataset ID from Solinkify and your email. Watch as the AI agent autonomously executes an on-chain payment, processes the acquired data, and dispatches the original file to the target email.
+Demo interaktif ini menunjukkan skema *Machine-to-Machine* (M2M). 
+Masukkan ID dataset dari Solinkify dan email kamu. Saksikan agen AI mengeksekusi pembayaran on-chain secara otonom serta langusung memproses datanya dan mengirim file aslinya ke email tujuan.
 """)
 
-# User input fields for the demo
-target_item_id = st.text_input("Enter Book ID (Target Data):", placeholder="Example: 75810dd6-2340-...")
-target_email = st.text_input("Target Email (File Recipient):", placeholder="your.email@gmail.com")
+# Input dari pengguna web
+target_item_id = st.text_input("Masukkan Book ID (Target Data):", placeholder="Contoh: 75810dd6-2340-...")
+target_email = st.text_input("Email Tujuan (Penerima File):", placeholder="email.kamu@gmail.com")
 
-# Main execution trigger
-if st.button("🚀 Launch AI Agent"):
-    # Input validation
+if st.button("🚀 Luncurkan Agen AI"):
     if not target_item_id or not target_email:
-        st.error("Please provide both the Book ID and a Target Email first.")
+        st.error("Mohon masukkan Book ID dan Email Tujuan terlebih dahulu.")
         st.stop()
 
-    # ==========================================
-    # 3. VIRTUAL TERMINAL LOGGING SYSTEM
-    # ==========================================
-    # Container to hold the simulated terminal output
+    # 3. SISTEM LOG TERMINAL VIRTUAL
     log_container = st.empty()
     logs_list = [] 
 
-    # Helper function to append and render logs with a slight delay for realistic UI feedback
     def print_log(msg):
         logs_list.append(msg)
         log_container.code("\n".join(logs_list), language="bash")
         time.sleep(0.4) 
 
-    print_log("🤖 [AI BUYER] Agent activated. Commencing initialization...")
+    print_log("🤖 [AI BUYER] Agen diaktifkan. Memulai inisialisasi...")
 
-    # Load the AI's private wallet key from environment variables
     private_key = os.getenv("AI_PRIVATE_KEY")
     if not private_key:
-        print_log("❌ [SYSTEM] Error: AI_PRIVATE_KEY not found in .env file!")
+        print_log("❌ [SYSTEM] Error: AI_PRIVATE_KEY tidak ditemukan di file .env!")
         st.stop()
 
     try:
-        # Initialize Solana Keypair and RPC Client
         ai_wallet = Keypair.from_base58_string(private_key)
         solana_client = Client(RPC_URL)
-        print_log(f"🔑 Connected to AI Wallet: {ai_wallet.pubkey()}")
+        print_log(f"🔑 Terhubung ke Wallet AI: {ai_wallet.pubkey()}")
 
         # ---------------------------------------------------------
-        # PHASE 1: PAYWALL DETECTION (HTTP 402)
+        # FASE 1: CEK HARGA
         # ---------------------------------------------------------
-        print_log(f"\n📡 Scanning paywall for item ID: {target_item_id}...")
+        print_log(f"\n📡 Mengecek paywall untuk barang ID: {target_item_id}...")
         response = requests.get(f"{MARKETPLACE_URL}/api/x402/book/{target_item_id}")
         
-        # Verify if the backend responds with a 402 Payment Required status
         if response.status_code != 402:
-            print_log(f"❌ Item not found or API did not respond correctly (Status: {response.status_code}).")
+            print_log(f"❌ Barang tidak ditemukan atau API tidak merespons (Status: {response.status_code}).")
             st.stop()
 
-        # Extract payment details from the invoice
         payment_details = response.json().get("payment_details")
         total_lamports = payment_details['seller_lamports'] + payment_details['admin_lamports']
         
-        # Convert Lamports to SOL for display purposes
+        # Konversi Lamports ke SOL
         total_sol = total_lamports / 1_000_000_000 
-        print_log(f"💰 Paywall detected! Total invoice amount: {total_sol} SOL.")
+        print_log(f"💰 Paywall terdeteksi! Total tagihan: {total_sol} SOL.")
 
         # ---------------------------------------------------------
-        # PHASE 2: AUTONOMOUS ON-CHAIN TRANSACTION
+        # FASE 2: TRANSAKSI OTOMATIS
         # ---------------------------------------------------------
-        print_log("\n⚡ Processing on-chain payment via Solana Devnet...")
+        print_log("\n⚡ Memproses pembayaran on-chain via Solana Devnet...")
         seller_pubkey = Pubkey.from_string(payment_details["seller_address"])
         admin_pubkey = Pubkey.from_string(payment_details["admin_address"])
         
-        # Fetch the latest blockhash to ensure transaction validity
         recent_blockhash = solana_client.get_latest_blockhash().value.blockhash
         
-        # Build the split-fee transaction instructions (Seller Share)
         ixs = [
             transfer(TransferParams(
                 from_pubkey=ai_wallet.pubkey(), to_pubkey=seller_pubkey, lamports=payment_details["seller_lamports"]
             ))
         ]
-        # Append Protocol Admin Share if applicable
         if payment_details["admin_lamports"] > 0:
             ixs.append(transfer(TransferParams(
                 from_pubkey=ai_wallet.pubkey(), to_pubkey=admin_pubkey, lamports=payment_details["admin_lamports"]
             )))
 
-        # Compile and sign the transaction message
         msg = Message(ixs, ai_wallet.pubkey())
         txn = Transaction([ai_wallet], msg, recent_blockhash)
 
-        # Broadcast the transaction to the Solana network
         tx_response = solana_client.send_transaction(txn)
         signature = tx_response.value
-        print_log(f"✅ Transaction Successful! Signature: {signature}")
+        print_log(f"✅ Transaksi Berhasil! Signature: {signature}")
         
-        print_log("⏳ Awaiting confirmation from the blockchain network...")
-        time.sleep(3) # Simulate network propagation time
+        print_log("⏳ Menunggu konfirmasi dari jaringan blockchain...")
+        time.sleep(3) 
 
         # ---------------------------------------------------------
-        # PHASE 3: DATA CLAIM (CRYPTOGRAPHY & IDEMPOTENCY)
+        # FASE 3: KLAIM DATA (DENGAN KRIPTOGRAFI & RETRY IDEMPOTENT)
         # ---------------------------------------------------------
-        print_log("\n🔓 Generating Cryptographic Signature (Message Signing)...")
+        print_log("\n🔓 Membuat Tanda Tangan Kriptografi (Message Signing)...")
         
-        # 1. The AI crafts a specific payload and signs it using its Private Key
+        # 1. AI meracik pesan khusus dan menandatanganinya pakai Private Key
         message_to_sign = f"{target_item_id}:{signature}".encode("utf-8")
         auth_signature = ai_wallet.sign_message(message_to_sign)
         
-        # 2. Compile the 3 required Security Keys for backend verification
+        # 2. Menyusun 3 Kunci Keamanan
         headers = {
             'x-payment-signature': str(signature),
             'x-buyer-pubkey': str(ai_wallet.pubkey()),
@@ -142,64 +119,64 @@ if st.button("🚀 Launch AI Agent"):
         
         claim_endpoint = f"{MARKETPLACE_URL}/api/x402/book/{target_item_id}?email={target_email}"
         
-        # 3. Idempotent Retry System (Network Resilience Mitigation)
+        # 3. Sistem Retry (Mitigasi Jika Internet Mati)
         max_retries = 3
         claim_data = None
         
         for attempt in range(1, max_retries + 1):
             try:
-                print_log(f"🔗 Attempting to download data (Attempt {attempt}/{max_retries})...")
-                # Enforce a short timeout to simulate potential network latency
+                print_log(f"🔗 Mencoba mengunduh data (Percobaan {attempt}/{max_retries})...")
+                # Kita gunakan timeout yang pendek untuk mensimulasikan jaringan lambat
                 claim_response = requests.get(claim_endpoint, headers=headers, timeout=15)
                 
                 if claim_response.status_code == 200:
                     claim_data = claim_response.json()
-                    break # Break the loop if successful
+                    break # Keluar dari loop jika berhasil
                 elif claim_response.status_code == 401:
-                    print_log(f"❌ [SECURITY ALARM] Server rejected claim: {claim_response.text}")
+                    print_log(f"❌ [KEAMANAN] Server menolak: {claim_response.text}")
                     st.stop()
             except requests.exceptions.RequestException as e:
-                print_log(f"⚠️ Connection issue: {str(e)}. The Idempotent system is retrying...")
+                print_log(f"⚠️ Koneksi bermasalah: {str(e)}. Sistem Idempotent akan mencoba ulang...")
                 time.sleep(3)
         
         if claim_data:
             download_url = claim_data.get("file_url")
-            print_log(f"📧 Backend confirmed: An email containing the Cloudflare R2 link is being dispatched to {target_email}.")
+            print_log(f"📧 Backend mengkonfirmasi: Email berisi link Cloudflare R2 sedang dikirim ke {target_email}.")
             
-            # The AI autonomously extracts the payload
+            # AI mengekstrak datanya
             file_response = requests.get(download_url)
             purchased_data = file_response.json()
-            print_log("📥 Process complete! Data successfully and securely acquired by the AI.")
+            print_log("📥 Proses selesai! Data berhasil diakuisisi dengan aman oleh AI.")
             
             # ---------------------------------------------------------
-            # PHASE 4: DISPLAY RAW ACQUIRED DATA
+            # FASE 4: AI MENAMPILKAN DATA MENTAH (TANPA SAVE LOKAL)
             # ---------------------------------------------------------
-            st.success(f"🎉 Task Completed! Below is the raw premium data acquired by the AI, which has also been dispatched to {target_email}.")
-            with st.expander("Click here to view the raw JSON payload parsed by the AI"):
+            st.success(f"🎉 Tugas Selesai! Berikut adalah data premium mentah yang dibeli oleh AI dan dikirim langsung ke {target_email}.")
+            with st.expander("Klik di sini untuk melihat format raw JSON yang di beli lalu dibaca AI"):
                 st.json(purchased_data) 
 
             # ---------------------------------------------------------
-            # PHASE 5: DATA VISUALIZATION (WEATHER ORACLE DASHBOARD)
+            # FASE 5: VISUALISASI DATA (DASHBOARD AI CUACA)
             # ---------------------------------------------------------
             st.markdown("---")
             st.markdown("### 🌤️ Oracle Weather Intelligence Report")
-            st.markdown("Below is the decoded visualization of the decentralized weather data purchased from the Solana network:")
+            st.markdown("Berikut adalah hasil dekode data cuaca terdesentralisasi yang dibeli dari jaringan Solana:")
             
-            # 1. Provider Information Header
+            # 1. Header Informasi Provider
             product_name = purchased_data.get("product", "Unknown Oracle")
             provider = purchased_data.get("provider", "Unknown Provider")
             desc = purchased_data.get("description", "")
             
             st.info(f"**{product_name}** by {provider}\n\n_{desc}_")
             
-            # 2. Key Metrics (Network Metadata)
+            # 2. Key Metrics (Metadata Jaringan)
             meta = purchased_data.get("meta", {})
             st.markdown("#### 📡 Network Consensus & Reliability")
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("🌍 Total Locations", meta.get("total_feeds", 0))
+            col1.metric("🌍 Total Lokasi", meta.get("total_feeds", 0))
             col2.metric("⚡ Uptime", meta.get("success_rate", "0%"))
             col3.metric("💻 Active Nodes", meta.get("active_nodes", 0))
-            col4.metric("⏱️ Update Rate", f"{meta.get('update_interval_hours', 0)} Hours")
+            col4.metric("⏱️ Update Rate", f"{meta.get('update_interval_hours', 0)} Jam")
             
             st.markdown("---")
             st.markdown("#### 📍 Live Data Feeds")
@@ -207,7 +184,7 @@ if st.button("🚀 Launch AI Agent"):
             feeds = purchased_data.get("sample_feeds", [])
             
             if feeds:
-                # Group data feeds by location for a structured UI presentation
+                # Mengelompokkan data berdasarkan lokasi agar rapi
                 locations = {}
                 for feed in feeds:
                     loc = feed.get("location", "Unknown")
@@ -215,12 +192,12 @@ if st.button("🚀 Launch AI Agent"):
                         locations[loc] = []
                     locations[loc].append(feed)
                     
-                # Render metrics dynamically for each grouped location
+                # Menampilkan kartu (kolom) untuk setiap lokasi
                 for loc, data_list in locations.items():
                     with st.container():
                         st.markdown(f"##### 🏙️ {loc}")
                         
-                        # Generate dynamic columns based on the number of parameters per location
+                        # Buat kolom dinamis sesuai jumlah parameter di lokasi tersebut
                         cols = st.columns(len(data_list))
                         
                         for i, item in enumerate(data_list):
@@ -230,31 +207,31 @@ if st.button("🚀 Launch AI Agent"):
                             raw_val = item.get("value_raw", 0)
                             scale = item.get("scale", 1)
                             
-                            # Sanitize anomalous raw values that haven't been scaled (e.g., 298 -> 29.8 °C)
+                            # Handle anomali nilai mentah yang belum dibagi scale (contoh: 298 -> 29.8 °C)
                             if val == raw_val and scale > 1:
                                 val = val / scale
                                 
-                            # Map parameters to appropriate UI emojis
+                            # Mapping Icon sesuai parameter
                             icon = "🌡️" if param == "Temperature" else \
                                    "💧" if param == "Humidity" else \
                                    "💨" if param == "Wind Speed" else \
                                    "☁️" if param == "Cloud Cover" else "📊"
                             
                             with cols[i]:
-                                # Utilize Streamlit's native metric card UI
+                                # Menggunakan card styling bawaan st.metric
                                 st.metric(label=f"{icon} {param}", value=f"{val} {unit}")
                                 
                         timestamp = data_list[0].get('updated_at_iso', '').replace("T", " ").replace("Z", " UTC")
                         st.caption(f"⏱️ _Last updated on-chain: {timestamp}_")
-                        st.write("") # UI Spacer
+                        st.write("") # Spacer
             else:
-                st.info("No weather data feeds found within this dataset.")
+                st.info("Tidak ada data feeds cuaca yang ditemukan dalam dataset ini.")
                 
-            # 3. Oracle Validator Node Status (Enhances Web3 integration UX)
-            with st.expander("View Oracle Node Consensus Status"):
+            # 3. Status Node Validator (Opsional untuk kesan Web3 yang lebih kuat)
+            with st.expander("Lihat Status Konsensus Node Oracle"):
                 nodes = purchased_data.get("nodes", [])
                 if nodes:
-                    node_cols = st.columns(3) # Display in a 3-column grid
+                    node_cols = st.columns(3) # Tampilkan 3 kolom per baris
                     for i, node in enumerate(nodes):
                         with node_cols[i % 3]:
                             status = "🟢 Active" if node.get("active") else "🔴 Offline"
@@ -264,8 +241,7 @@ if st.button("🚀 Launch AI Agent"):
                             st.markdown("---")
             
         else:
-            print_log(f"❌ Failed to retrieve data. Server responded: {claim_response.text}")
+            print_log(f"❌ Gagal mengambil data. Server merespons: {claim_response.text}")
 
     except Exception as e:
-        # Catch-all exception handler for unexpected system errors
-        print_log(f"❌ System encountered a critical error: {str(e)}")
+        print_log(f"❌ Terjadi kesalahan sistem: {str(e)}")
